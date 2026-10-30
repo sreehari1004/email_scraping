@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import json
 import csv
 import threading
@@ -167,6 +168,12 @@ async def upload_file_urls(file: UploadFile = File(...)):
         "urls": urls
     }
 
+def normalize_site_domain(url_or_name: str) -> str:
+    m = re.search(r'([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', url_or_name)
+    if m:
+        return m.group(1).lower().replace("www.", "").strip()
+    return url_or_name.lower().replace("www.", "").strip()
+
 @app.post("/api/scrape/start")
 def start_scrape(req: StartScrapeRequest, background_tasks: BackgroundTasks):
     urls = clean_and_deduplicate(req.urls)
@@ -175,6 +182,27 @@ def start_scrape(req: StartScrapeRequest, background_tasks: BackgroundTasks):
 
     conn = get_connection()
     cursor = conn.cursor()
+
+    # Prevent duplication in history:
+    # If any website being scraped already exists in a previous job, remove the older job(s)
+    for url in urls:
+        dom = normalize_site_domain(url)
+        if dom:
+            # Find jobs matching this domain
+            cursor.execute("""
+                SELECT id FROM jobs 
+                WHERE LOWER(job_name) LIKE ? OR EXISTS (
+                    SELECT 1 FROM job_websites jw WHERE jw.job_id = jobs.id AND LOWER(jw.website) LIKE ?
+                )
+            """, (f"%{dom}%", f"%{dom}%"))
+            old_job_ids = [r[0] for r in cursor.fetchall()]
+            if old_job_ids:
+                placeholders = ",".join("?" * len(old_job_ids))
+                cursor.execute(f"DELETE FROM contacts WHERE job_id IN ({placeholders})", old_job_ids)
+                cursor.execute(f"DELETE FROM job_websites WHERE job_id IN ({placeholders})", old_job_ids)
+                cursor.execute(f"DELETE FROM jobs WHERE id IN ({placeholders})", old_job_ids)
+                conn.commit()
+
     now_str = datetime.now().strftime("%b %d, %Y %I:%M %p")
     first_domain = urls[0].split("://")[-1].split("/")[0]
     job_name = f"{first_domain} & {len(urls) - 1} more" if len(urls) > 1 else f"{first_domain} Scraping"
@@ -262,12 +290,21 @@ def get_history(
 @app.get("/api/history/export")
 def export_contacts(
     format: str = Query("csv", pattern="^(csv|xlsx)$"),
-    job_id: Optional[int] = None
+    job_id: Optional[int] = None,
+    job_ids: Optional[str] = None
 ):
     conn = get_connection()
     cursor = conn.cursor()
 
-    if job_id:
+    if job_ids:
+        # Export only the selected jobs/companies
+        parsed_ids = [int(i.strip()) for i in job_ids.split(",") if i.strip().isdigit()]
+        if parsed_ids:
+            placeholders = ",".join("?" * len(parsed_ids))
+            cursor.execute(f"SELECT * FROM contacts WHERE job_id IN ({placeholders}) ORDER BY id ASC", parsed_ids)
+        else:
+            cursor.execute("SELECT * FROM contacts ORDER BY id DESC")
+    elif job_id:
         cursor.execute("SELECT * FROM contacts WHERE job_id = ? ORDER BY id ASC", (job_id,))
     else:
         cursor.execute("SELECT * FROM contacts ORDER BY id DESC")

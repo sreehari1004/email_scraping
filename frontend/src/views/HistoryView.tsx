@@ -102,8 +102,14 @@ export const HistoryView: React.FC = () => {
     }
   };
 
-  const handleExport = (format: 'csv' | 'xlsx') => {
-    window.location.href = `/api/history/export?format=${format}`;
+  const handleExport = (format: 'csv' | 'xlsx', targetJobId?: number) => {
+    const params = new URLSearchParams({ format });
+    if (targetJobId) {
+      params.append('job_id', targetJobId.toString());
+    } else if (selectedIds.length > 0) {
+      params.append('job_ids', selectedIds.join(','));
+    }
+    window.location.href = `/api/history/export?${params.toString()}`;
   };
 
   return (
@@ -172,7 +178,7 @@ export const HistoryView: React.FC = () => {
             className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl shadow-xs transition-colors cursor-pointer"
           >
             <Download className="w-4 h-4" />
-            Export
+            {selectedIds.length > 0 ? `Export (${selectedIds.length} Selected)` : 'Export'}
           </button>
         </div>
       </div>
@@ -288,12 +294,12 @@ export const HistoryView: React.FC = () => {
                               <div className="absolute right-0 mt-1 w-36 bg-white border border-slate-200 rounded-xl shadow-lg py-1 z-20 text-left">
                                 <button
                                   onClick={() => {
-                                    handleExport('csv');
+                                    handleExport('csv', job.id);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                                  className="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2 cursor-pointer"
                                 >
-                                  <Download className="w-3.5 h-3.5" /> Export Data
+                                  <Download className="w-3.5 h-3.5" /> Export Company
                                 </button>
                                 <button
                                   onClick={() => {
