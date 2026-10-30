@@ -135,34 +135,6 @@ def run_scrape_job(batch_id: int, url_job_pairs: List[Tuple[str, int]]):
         ))
         conn.commit()
 
-    final_status = "Completed" if completed_count > 0 else "Failed"
-
-    # Automated email notification (PRD 3.4)
-    cursor.execute("SELECT key, value FROM settings WHERE key IN ('notification_email', 'notify_on_complete')")
-    setting_rows = {r["key"]: r["value"] for r in cursor.fetchall()}
-    notify_email = setting_rows.get("notification_email")
-    notify_on_complete = setting_rows.get("notify_on_complete", "true") == "true"
-
-    if notify_email and notify_on_complete and final_status == "Completed":
-        html_report = f"""
-        <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; rounded: 12px;">
-            <h2 style="color: #1e293b;">Scraping Activity Summary</h2>
-            <p>Your web contact scraping job has successfully completed.</p>
-            <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
-                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Status:</td><td style="padding: 8px 0; font-weight: bold; color: #10b981;">{final_status}</td></tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Websites Processed:</td><td style="padding: 8px 0; font-weight: bold;">{completed_count} / {total}</td></tr>
-                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Contacts Extracted:</td><td style="padding: 8px 0; font-weight: bold; color: #2563eb;">{total_contacts}</td></tr>
-            </table>
-            <p style="font-size: 13px; color: #94a3b8;">This report was automatically dispatched by your Website Contact Scraper system.</p>
-        </div>
-        """
-        send_smtp_email(
-            to_email=notify_email,
-            subject=f"Scraping Completed: {total_contacts} Contacts Extracted",
-            body_html=html_report,
-            body_text=f"Scraping Completed. Processed: {completed_count}/{total}, Contacts: {total_contacts}."
-        )
-
     conn.close()
 
 # ----------------- Endpoints -----------------

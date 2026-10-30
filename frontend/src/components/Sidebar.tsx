@@ -3,9 +3,7 @@ import {
   Home, 
   Clock, 
   BarChart2, 
-  Mail, 
-  Bell, 
-  Settings 
+  Mail
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -19,7 +17,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
     { id: 'history', label: 'History', icon: Clock },
     { id: 'analytics', label: 'Analytics', icon: BarChart2 },
     { id: 'outreach', label: 'Email Outreach', icon: Mail },
-    { id: 'notifications', label: 'Email Notifications', icon: Bell },
   ];
 
   return (
@@ -42,7 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
               <button
                 key={item.id}
                 onClick={() => onNavigate(item.id)}
-                className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
                   isActive
                     ? 'bg-blue-50 text-blue-600 font-semibold'
                     : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
@@ -54,21 +51,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onNavigate }) => 
             );
           })}
         </nav>
-      </div>
-
-      {/* Footer Navigation */}
-      <div className="pt-4 border-t border-slate-100">
-        <button
-          onClick={() => onNavigate('settings')}
-          className={`w-full flex items-center gap-3.5 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors ${
-            currentView === 'settings'
-              ? 'bg-blue-50 text-blue-600 font-semibold'
-              : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-          }`}
-        >
-          <Settings className="w-5 h-5 text-slate-500" />
-          Settings
-        </button>
       </div>
     </aside>
   );

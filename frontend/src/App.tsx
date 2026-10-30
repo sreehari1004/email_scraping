@@ -5,7 +5,6 @@ import { ProgressView } from './views/ProgressView';
 import { HistoryView } from './views/HistoryView';
 import { AnalyticsView } from './views/AnalyticsView';
 import { EmailOutreachView } from './views/EmailOutreachView';
-import { SettingsView } from './views/SettingsView';
 import { JobDetailsModal } from './components/JobDetailsModal';
 
 export const App: React.FC = () => {
@@ -54,10 +53,6 @@ export const App: React.FC = () => {
         {currentView === 'analytics' && <AnalyticsView />}
 
         {currentView === 'outreach' && <EmailOutreachView />}
-
-        {(currentView === 'settings' || currentView === 'notifications') && (
-          <SettingsView />
-        )}
       </main>
 
       {/* Standalone Job Details Modal if triggered */}
