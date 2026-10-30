@@ -6,7 +6,7 @@ import csv
 import threading
 import time
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import FastAPI, UploadFile, File, Form, Query, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,7 @@ from database import init_db, get_connection
 from file_parser import parse_csv_file, parse_excel_file, parse_pdf_file, clean_and_deduplicate
 from scraper import scrape_url
 from ai_service import generate_email_content
+from email_sender import get_smtp_config, test_smtp_connection, send_smtp_email
 
 # Initialize Database
 init_db()
@@ -52,21 +53,21 @@ class SettingsUpdateRequest(BaseModel):
     notification_email: str
     notify_on_complete: bool
     notify_on_failure: bool
-    gemini_api_key: Optional[str] = ""
 
 # ----------------- Helper Background Worker -----------------
-def run_scrape_job(job_id: int, urls: List[str]):
+def run_scrape_job(batch_id: int, url_job_pairs: List[Tuple[str, int]]):
     conn = get_connection()
     cursor = conn.cursor()
 
-    total = len(urls)
+    total = len(url_job_pairs)
     completed_count = 0
     failed_count = 0
     total_contacts = 0
-    start_time = time.time()
 
-    for url in urls:
+    for url, job_id in url_job_pairs:
+        site_start = time.time()
         parsed_domain = url.split("://")[-1].split("/")[0]
+
         # Insert initial in-progress record for this website
         cursor.execute("""
             INSERT INTO job_websites (job_id, website, url, status, contacts_count, last_updated, error_message)
@@ -88,14 +89,14 @@ def run_scrape_job(job_id: int, urls: List[str]):
             failed_count += 1
         total_contacts += contacts_count
 
-        # Update job_websites
+        # Update job_websites for this site
         cursor.execute("""
             UPDATE job_websites
             SET status = ?, contacts_count = ?, last_updated = 'Just now', error_message = ?
             WHERE id = ?
         """, (status, contacts_count, error_msg, site_id))
 
-        # Insert contacts
+        # Insert contacts strictly under this website's job_id
         for c in contacts:
             cursor.execute("""
                 INSERT INTO contacts (job_id, website_id, name, email, phone, designation, source_url, company_name, address, social_links, created_at)
@@ -114,28 +115,54 @@ def run_scrape_job(job_id: int, urls: List[str]):
                 datetime.now().isoformat()
             ))
 
-        # Update job running totals
-        in_progress = total - (completed_count + failed_count)
+        site_elapsed = int(time.time() - site_start)
+        hours, rem = divmod(site_elapsed, 3600)
+        minutes, seconds = divmod(rem, 60)
+        site_duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+        # Update this specific job row
         cursor.execute("""
             UPDATE jobs
-            SET completed_websites = ?, failed_websites = ?, in_progress_websites = ?, contacts_found = ?
+            SET status = ?, completed_websites = ?, failed_websites = ?, in_progress_websites = 0, contacts_found = ?, duration = ?
             WHERE id = ?
-        """, (completed_count, failed_count, in_progress, total_contacts, job_id))
+        """, (
+            status,
+            1 if status == "Completed" else 0,
+            1 if status == "Failed" else 0,
+            contacts_count,
+            site_duration_str,
+            job_id
+        ))
         conn.commit()
 
-    # Finish job
-    elapsed = int(time.time() - start_time)
-    hours, rem = divmod(elapsed, 3600)
-    minutes, seconds = divmod(rem, 60)
-    duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-
     final_status = "Completed" if completed_count > 0 else "Failed"
-    cursor.execute("""
-        UPDATE jobs
-        SET status = ?, in_progress_websites = 0, duration = ?
-        WHERE id = ?
-    """, (final_status, duration_str, job_id))
-    conn.commit()
+
+    # Automated email notification (PRD 3.4)
+    cursor.execute("SELECT key, value FROM settings WHERE key IN ('notification_email', 'notify_on_complete')")
+    setting_rows = {r["key"]: r["value"] for r in cursor.fetchall()}
+    notify_email = setting_rows.get("notification_email")
+    notify_on_complete = setting_rows.get("notify_on_complete", "true") == "true"
+
+    if notify_email and notify_on_complete and final_status == "Completed":
+        html_report = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; padding: 20px; border: 1px solid #e2e8f0; rounded: 12px;">
+            <h2 style="color: #1e293b;">Scraping Activity Summary</h2>
+            <p>Your web contact scraping job has successfully completed.</p>
+            <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Status:</td><td style="padding: 8px 0; font-weight: bold; color: #10b981;">{final_status}</td></tr>
+                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Websites Processed:</td><td style="padding: 8px 0; font-weight: bold;">{completed_count} / {total}</td></tr>
+                <tr style="border-bottom: 1px solid #f1f5f9;"><td style="padding: 8px 0; color: #64748b;">Contacts Extracted:</td><td style="padding: 8px 0; font-weight: bold; color: #2563eb;">{total_contacts}</td></tr>
+            </table>
+            <p style="font-size: 13px; color: #94a3b8;">This report was automatically dispatched by your Website Contact Scraper system.</p>
+        </div>
+        """
+        send_smtp_email(
+            to_email=notify_email,
+            subject=f"Scraping Completed: {total_contacts} Contacts Extracted",
+            body_html=html_report,
+            body_text=f"Scraping Completed. Processed: {completed_count}/{total}, Contacts: {total_contacts}."
+        )
+
     conn.close()
 
 # ----------------- Endpoints -----------------
@@ -183,10 +210,17 @@ def start_scrape(req: StartScrapeRequest, background_tasks: BackgroundTasks):
     conn = get_connection()
     cursor = conn.cursor()
 
+    batch_id = int(time.time() * 1000)
+    now_str = datetime.now().strftime("%b %d, %Y %I:%M %p")
+    url_job_pairs = []
+
     # Prevent duplication in history:
-    # If any website being scraped already exists in a previous job, remove the older job(s)
+    # If any website being scraped already exists in a previous job, remove the older record(s)
     for url in urls:
         dom = normalize_site_domain(url)
+        parsed_domain = url.split("://")[-1].split("/")[0]
+        site_name = parsed_domain if parsed_domain else dom
+
         if dom:
             # Find jobs matching this domain
             cursor.execute("""
@@ -203,42 +237,75 @@ def start_scrape(req: StartScrapeRequest, background_tasks: BackgroundTasks):
                 cursor.execute(f"DELETE FROM jobs WHERE id IN ({placeholders})", old_job_ids)
                 conn.commit()
 
-    now_str = datetime.now().strftime("%b %d, %Y %I:%M %p")
-    first_domain = urls[0].split("://")[-1].split("/")[0]
-    job_name = f"{first_domain} & {len(urls) - 1} more" if len(urls) > 1 else f"{first_domain} Scraping"
+        # Insert individual job for each website
+        cursor.execute("""
+            INSERT INTO jobs (job_name, created_at, status, total_websites, completed_websites, failed_websites, in_progress_websites, contacts_found, duration, batch_id)
+            VALUES (?, ?, 'In Progress', 1, 0, 0, 1, 0, '00:00:00', ?)
+        """, (site_name, now_str, batch_id))
+        conn.commit()
+        site_job_id = cursor.lastrowid
+        url_job_pairs.append((url, site_job_id))
 
-    cursor.execute("""
-        INSERT INTO jobs (job_name, created_at, status, total_websites, completed_websites, failed_websites, in_progress_websites, contacts_found, duration)
-        VALUES (?, ?, 'In Progress', ?, 0, 0, ?, 0, '00:00:00')
-    """, (job_name, now_str, len(urls), len(urls)))
-    conn.commit()
-    job_id = cursor.lastrowid
     conn.close()
 
-    background_tasks.add_task(run_scrape_job, job_id, urls)
+    background_tasks.add_task(run_scrape_job, batch_id, url_job_pairs)
 
-    return {"job_id": job_id, "status": "In Progress", "total": len(urls)}
+    return {"job_id": batch_id, "status": "In Progress", "total": len(urls)}
 
 @app.get("/api/scrape/progress/{job_id}")
 def get_job_progress(job_id: int):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
-    job = cursor.fetchone()
-    if not job:
+    cursor.execute("SELECT * FROM jobs WHERE batch_id = ? OR id = ? ORDER BY id ASC", (job_id, job_id))
+    matched_jobs = [dict(r) for r in cursor.fetchall()]
+    if not matched_jobs:
         conn.close()
         raise HTTPException(status_code=404, detail="Job not found")
 
-    cursor.execute("SELECT * FROM job_websites WHERE job_id = ? ORDER BY id DESC", (job_id,))
+    job_ids = [j["id"] for j in matched_jobs]
+    placeholders = ",".join("?" * len(job_ids))
+    cursor.execute(f"SELECT * FROM job_websites WHERE job_id IN ({placeholders}) ORDER BY id ASC", job_ids)
     websites = [dict(w) for w in cursor.fetchall()]
+
+    # If any job in matched_jobs has not started scraping yet, provide queued placeholder
+    seen_job_ids = {w["job_id"] for w in websites}
+    for j in matched_jobs:
+        if j["id"] not in seen_job_ids:
+            websites.append({
+                "id": j["id"],
+                "job_id": j["id"],
+                "website": j["job_name"],
+                "url": f"https://{j['job_name']}",
+                "status": j["status"],
+                "contacts_count": j["contacts_found"],
+                "last_updated": "Pending",
+                "error_message": ""
+            })
+
     conn.close()
 
-    total = job["total_websites"] or 1
-    processed = (job["completed_websites"] or 0) + (job["failed_websites"] or 0)
-    percent = int((processed / total) * 100) if total > 0 else 0
+    total = len(matched_jobs)
+    completed = sum(1 for j in matched_jobs if j["status"] == "Completed")
+    failed = sum(1 for j in matched_jobs if j["status"] == "Failed")
+    in_progress = sum(1 for j in matched_jobs if j["status"] == "In Progress")
+    total_contacts = sum(j["contacts_found"] for j in matched_jobs)
+    percent = int(((completed + failed) / total) * 100) if total > 0 else 0
+    overall_status = "In Progress" if in_progress > 0 else ("Completed" if completed > 0 else "Failed")
 
+    first_job = matched_jobs[0]
     return {
-        "job": dict(job),
+        "job": {
+            "id": job_id,
+            "job_name": first_job["job_name"],
+            "created_at": first_job["created_at"],
+            "status": overall_status,
+            "total_websites": total,
+            "completed_websites": completed,
+            "failed_websites": failed,
+            "in_progress_websites": in_progress,
+            "contacts_found": total_contacts,
+            "duration": first_job.get("duration", "00:00:00")
+        },
         "percent": percent,
         "websites": websites
     }
@@ -515,13 +582,29 @@ def send_outreach_emails(req: SendEmailRequest):
         p_subject = req.subject.replace("{{company_name}}", company).replace("{{contact_name}}", company).replace("{{email}}", email)
         p_body = req.body.replace("{{company_name}}", company).replace("{{contact_name}}", company).replace("{{email}}", email)
 
+        # Attempt actual SMTP email send if configured
+        smtp_success, smtp_msg = send_smtp_email(
+            to_email=email,
+            subject=p_subject,
+            body_html=p_body.replace("\n", "<br>"),
+            body_text=p_body
+        )
+
+        status = "Sent" if smtp_success else "Failed"
+        error_details = "" if smtp_success else smtp_msg
+
         # Log to outreach_logs table
         cursor.execute("""
             INSERT INTO outreach_logs (company_name, email, subject, body, status, sent_on, error_details)
-            VALUES (?, ?, ?, ?, 'Sent', ?, '')
-        """, (company, email, p_subject, p_body, now_str))
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (company, email, p_subject, p_body, status, now_str, error_details))
 
-        results.append({"company": company, "email": email, "status": "Sent"})
+        results.append({
+            "company": company, 
+            "email": email, 
+            "status": status,
+            "error": error_details
+        })
 
     conn.commit()
     conn.close()
@@ -549,13 +632,21 @@ def get_settings():
     cursor.execute("SELECT * FROM settings")
     rows = {r["key"]: r["value"] for r in cursor.fetchall()}
     conn.close()
-    gemini_key = rows.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY", "")
+
+    smtp_cfg = get_smtp_config()
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+
     return {
         "notification_email": rows.get("notification_email", "admin@company.com"),
         "notify_on_complete": rows.get("notify_on_complete", "true") == "true",
         "notify_on_failure": rows.get("notify_on_failure", "true") == "true",
-        "gemini_api_key": gemini_key,
-        "ai_active": bool(gemini_key.strip())
+        "ai_active": bool(gemini_key.strip()),
+        # Public status info loaded from .env (no sensitive keys or passwords)
+        "smtp_host": smtp_cfg["host"],
+        "smtp_port": smtp_cfg["port"],
+        "smtp_user": smtp_cfg["user"],
+        "smtp_from_name": smtp_cfg["from_name"],
+        "smtp_configured": smtp_cfg["configured"]
     }
 
 @app.post("/api/settings")
@@ -565,12 +656,29 @@ def save_settings(req: SettingsUpdateRequest):
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('notification_email', ?)", (req.notification_email,))
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('notify_on_complete', ?)", ("true" if req.notify_on_complete else "false",))
     cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('notify_on_failure', ?)", ("true" if req.notify_on_failure else "false",))
-    if req.gemini_api_key is not None:
-        cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('gemini_api_key', ?)", (req.gemini_api_key.strip(),))
-        os.environ["GEMINI_API_KEY"] = req.gemini_api_key.strip()
+    # Ensure sensitive credentials remain strictly in .env, not in database
+    cursor.execute("DELETE FROM settings WHERE key IN ('smtp_password', 'gemini_api_key', 'smtp_user')")
     conn.commit()
     conn.close()
     return {"success": True}
+
+@app.post("/api/settings/test-smtp")
+def test_smtp_endpoint():
+    cfg = get_smtp_config()
+    if not cfg["configured"]:
+        return {
+            "success": False,
+            "message": "SMTP credentials are not configured. Please set SMTP_USER and SMTP_PASSWORD in your .env file."
+        }
+
+    success, message = test_smtp_connection(
+        host=cfg["host"],
+        port=cfg["port"],
+        user=cfg["user"],
+        password=cfg["password"],
+        use_tls=cfg["use_tls"]
+    )
+    return {"success": success, "message": message}
 
 # --- 6. Frontend Static Assets Serving ---
 DIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))

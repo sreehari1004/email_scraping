@@ -14,12 +14,11 @@ export const Header: React.FC<HeaderProps> = ({ title, subtitle, children }) => 
         <p className="text-sm text-slate-500 mt-1">{subtitle}</p>
       </div>
 
-      <div className="flex items-center gap-4">
-        {children}
-        <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-sm font-semibold text-slate-700 shadow-xs cursor-pointer hover:bg-slate-200 transition-colors">
-          JD
+      {children && (
+        <div className="flex items-center gap-4">
+          {children}
         </div>
-      </div>
+      )}
     </div>
   );
 };

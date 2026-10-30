@@ -18,9 +18,8 @@ interface HomeViewProps {
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({ onStartScraping }) => {
-  const [activeTab, setActiveTab] = useState<'single' | 'bulk' | 'upload'>('bulk');
-  const [singleUrl, setSingleUrl] = useState('');
-  const [bulkUrls, setBulkUrls] = useState('');
+  const [activeTab, setActiveTab] = useState<'url' | 'upload'>('url');
+  const [urlInput, setUrlInput] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStats, setUploadStats] = useState<{ filename: string; count: number } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -48,8 +47,8 @@ export const HomeView: React.FC<HomeViewProps> = ({ onStartScraping }) => {
 
       const data = await res.json();
       setUploadStats({ filename: data.filename, count: data.count });
-      setBulkUrls(data.urls.join('\n'));
-      setActiveTab('bulk');
+      setUrlInput(data.urls.join('\n'));
+      setActiveTab('url');
     } catch (err: any) {
       setError(err.message || 'Error uploading file');
     } finally {
@@ -57,26 +56,21 @@ export const HomeView: React.FC<HomeViewProps> = ({ onStartScraping }) => {
     }
   };
 
+  const urlCount = urlInput
+    .split('\n')
+    .map((u) => u.trim())
+    .filter((u) => u.length > 0).length;
+
   const handleStart = async () => {
     setError(null);
-    let urlsToScrape: string[] = [];
+    const urlsToScrape = urlInput
+      .split('\n')
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0);
 
-    if (activeTab === 'single') {
-      if (!singleUrl.trim()) {
-        setError('Please enter a website URL');
-        return;
-      }
-      urlsToScrape = [singleUrl.trim()];
-    } else {
-      urlsToScrape = bulkUrls
-        .split('\n')
-        .map((u) => u.trim())
-        .filter((u) => u.length > 0);
-
-      if (urlsToScrape.length === 0) {
-        setError('Please enter at least one URL');
-        return;
-      }
+    if (urlsToScrape.length === 0) {
+      setError('Please enter at least one website URL');
+      return;
     }
 
     setIsLoading(true);
@@ -135,30 +129,19 @@ export const HomeView: React.FC<HomeViewProps> = ({ onStartScraping }) => {
           {/* Segmented Control Tabs */}
           <div className="inline-flex p-1.5 bg-slate-100 rounded-xl mb-6">
             <button
-              onClick={() => setActiveTab('single')}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'single'
+              onClick={() => setActiveTab('url')}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
+                activeTab === 'url'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Link2 className="w-4 h-4" />
-              Single URL
-            </button>
-            <button
-              onClick={() => setActiveTab('bulk')}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${
-                activeTab === 'bulk'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <FileText className="w-4 h-4" />
-              Bulk URLs
+              URL
             </button>
             <button
               onClick={() => setActiveTab('upload')}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium transition-all cursor-pointer ${
                 activeTab === 'upload'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -170,38 +153,25 @@ export const HomeView: React.FC<HomeViewProps> = ({ onStartScraping }) => {
           </div>
 
           {/* Form Content */}
-          {activeTab === 'single' && (
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Website URL
-                </label>
-                <input
-                  type="url"
-                  placeholder="https://example.com"
-                  value={singleUrl}
-                  onChange={(e) => setSingleUrl(e.target.value)}
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:outline-hidden focus:border-blue-500 focus:bg-white text-sm"
-                />
-              </div>
-              <p className="text-xs text-slate-500">
-                Enter a full URL including protocol (e.g., https://company.com).
-              </p>
-            </div>
-          )}
-
-          {activeTab === 'bulk' && (
+          {activeTab === 'url' && (
             <div className="space-y-4">
               <textarea
                 rows={8}
-                value={bulkUrls}
-                onChange={(e) => setBulkUrls(e.target.value)}
-                placeholder="Paste website URLs (one per line)&#10;https://example.com&#10;https://another.com"
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 font-mono text-sm focus:outline-hidden focus:border-blue-500 focus:bg-white resize-y"
+                value={urlInput}
+                onChange={(e) => setUrlInput(e.target.value)}
+                placeholder={`Paste a single URL or multiple URLs (one per line)
+https://example.com
+https://anothersite.com`}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 font-mono text-sm focus:outline-hidden focus:border-blue-500 focus:bg-white resize-y shadow-2xs"
               />
-              <p className="text-xs text-slate-500">
-                You can also upload a CSV, Excel or PDF file containing website URLs.
-              </p>
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <span>Enter a single website URL or paste multiple URLs (one per line).</span>
+                {urlCount > 0 && (
+                  <span className="font-semibold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-100">
+                    {urlCount} {urlCount === 1 ? 'URL' : 'URLs'} entered
+                  </span>
+                )}
+              </div>
             </div>
           )}
 

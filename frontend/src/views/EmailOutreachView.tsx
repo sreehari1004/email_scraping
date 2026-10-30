@@ -622,10 +622,20 @@ export const EmailOutreachView: React.FC = () => {
                       </span>
                     )}
                     {log.status === 'Failed' && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700">
-                        <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                        Failed
-                      </span>
+                      <div>
+                        <span 
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 cursor-help"
+                          title={log.error_details || 'Sending failed'}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                          Failed
+                        </span>
+                        {log.error_details && (
+                          <div className="text-[11px] text-red-500 max-w-xs truncate mt-1" title={log.error_details}>
+                            {log.error_details}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="py-4 px-6 text-slate-500 text-xs">

@@ -94,11 +94,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ jobId, onBack, onVie
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-sm font-semibold text-slate-700 shadow-xs">
-            JD
-          </div>
-        </div>
+
       </div>
 
       {/* Progress Bar Card */}
@@ -222,7 +218,7 @@ export const ProgressView: React.FC<ProgressViewProps> = ({ jobId, onBack, onVie
                     <td className="py-4 px-6 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          onClick={() => onViewJob(jobId)}
+                          onClick={() => onViewJob(site.job_id || jobId)}
                           className="px-3 py-1 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                         >
                           View

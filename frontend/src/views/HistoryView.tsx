@@ -220,7 +220,6 @@ export const HistoryView: React.FC = () => {
                 </tr>
               ) : (
                 jobs.map((job) => {
-                  const domain = job.job_name.split(' ')[0] || 'example.com';
                   return (
                     <tr key={job.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="py-4 px-5 text-center">
@@ -238,8 +237,10 @@ export const HistoryView: React.FC = () => {
                             <Globe className="w-5 h-5" />
                           </div>
                           <div>
-                            <div className="font-bold text-slate-900">{domain}</div>
-                            <div className="text-xs text-slate-400">https://{domain}</div>
+                            <div className="font-bold text-slate-900">{job.job_name}</div>
+                            <div className="text-xs text-slate-400">
+                              {job.job_name.startsWith('http') ? job.job_name : `https://${job.job_name}`}
+                            </div>
                           </div>
                         </div>
                       </td>

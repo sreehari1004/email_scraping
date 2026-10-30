@@ -23,7 +23,8 @@ def init_db():
         failed_websites INTEGER DEFAULT 0,
         in_progress_websites INTEGER DEFAULT 0,
         contacts_found INTEGER DEFAULT 0,
-        duration TEXT
+        duration TEXT,
+        batch_id INTEGER DEFAULT 0
     )
     """)
 

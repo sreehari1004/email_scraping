@@ -19,6 +19,7 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
   const [websites, setWebsites] = useState<JobWebsite[]>([]);
   const [activeTab, setActiveTab] = useState<'contacts' | 'websites' | 'summary'>('contacts');
   const [search, setSearch] = useState('');
+  const [websiteFilter, setWebsiteFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,13 +45,23 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
   };
 
   const filteredContacts = contacts.filter((c) => {
+    if (websiteFilter !== 'all') {
+      const targetW = websites.find(w => w.website === websiteFilter);
+      const matchesWebsite = (targetW && c.website_id === targetW.id) ||
+        (c.source_url && c.source_url.includes(websiteFilter)) ||
+        (c.company_name && c.company_name.toLowerCase().includes(websiteFilter.toLowerCase()));
+      if (!matchesWebsite) return false;
+    }
     const term = search.toLowerCase();
     return (
       c.name.toLowerCase().includes(term) ||
       c.email.toLowerCase().includes(term) ||
-      c.phone.toLowerCase().includes(term)
+      c.phone.toLowerCase().includes(term) ||
+      (c.company_name && c.company_name.toLowerCase().includes(term))
     );
   });
+
+  const isMultiSite = websites.length > 1;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
@@ -65,10 +76,10 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
               </div>
               <div>
                 <h3 className="font-bold text-slate-900 text-base">
-                  {job?.job_name?.split(' ')[0] || 'example1.com'}
+                  {websites[0]?.website || job?.job_name || 'Website'}
                 </h3>
                 <span className="text-xs text-slate-400">
-                  {websites[0]?.url || `https://${job?.job_name?.split(' ')[0] || 'example1.com'}`}
+                  {websites[0]?.url || (job?.job_name?.startsWith('http') ? job.job_name : `https://${job?.job_name || 'website.com'}`)}
                 </span>
               </div>
             </div>
@@ -150,6 +161,21 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
 
           {activeTab === 'contacts' && (
             <div className="flex items-center gap-3 py-2">
+              {isMultiSite && (
+                <select
+                  value={websiteFilter}
+                  onChange={(e) => setWebsiteFilter(e.target.value)}
+                  className="bg-white border border-slate-200 rounded-lg text-xs text-slate-700 px-2.5 py-1.5 focus:outline-hidden"
+                >
+                  <option value="all">All Websites ({contacts.length})</option>
+                  {websites.map((w) => (
+                    <option key={w.id} value={w.website}>
+                      {w.website}
+                    </option>
+                  ))}
+                </select>
+              )}
+
               <div className="relative">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
@@ -186,6 +212,7 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
                 <thead className="bg-slate-50/80 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   <tr>
                     <th className="py-3 px-4">Name</th>
+                    {isMultiSite && <th className="py-3 px-4">Website</th>}
                     <th className="py-3 px-4">Email</th>
                     <th className="py-3 px-4">Phone</th>
                   </tr>
@@ -193,7 +220,7 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
                 <tbody className="divide-y divide-slate-100">
                   {filteredContacts.length === 0 ? (
                     <tr>
-                      <td colSpan={3} className="py-8 text-center text-slate-400">
+                      <td colSpan={isMultiSite ? 4 : 3} className="py-8 text-center text-slate-400">
                         No contacts found matching your search.
                       </td>
                     </tr>
@@ -203,6 +230,13 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
                         <td className="py-3.5 px-4 font-semibold text-slate-900">
                           {contact.name || 'N/A'}
                         </td>
+                        {isMultiSite && (
+                          <td className="py-3.5 px-4 text-xs font-medium text-slate-600">
+                            <span className="inline-block px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
+                              {contact.company_name || contact.source_url?.split('//')[1]?.split('/')[0] || 'Website'}
+                            </span>
+                          </td>
+                        )}
                         <td className="py-3.5 px-4 text-slate-700">
                           {contact.email ? (
                             <a href={`mailto:${contact.email}`} className="hover:text-blue-600 hover:underline">
@@ -229,7 +263,7 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
                     <th className="py-3 px-4">Website</th>
                     <th className="py-3 px-4">Status</th>
                     <th className="py-3 px-4">Contacts Extracted</th>
-                    <th className="py-3 px-4">Details</th>
+                    <th className="py-3 px-4 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -252,8 +286,16 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
                       <td className="py-3.5 px-4 font-medium text-slate-800">
                         {w.contacts_count}
                       </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-500">
-                        {w.error_message || 'Successfully crawled contact, team, and about pages.'}
+                      <td className="py-3.5 px-4 text-right">
+                        <button
+                          onClick={() => {
+                            setWebsiteFilter(w.website);
+                            setActiveTab('contacts');
+                          }}
+                          className="px-3 py-1 text-xs font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors cursor-pointer"
+                        >
+                          View Contacts
+                        </button>
                       </td>
                     </tr>
                   ))}
