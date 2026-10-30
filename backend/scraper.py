@@ -775,95 +775,40 @@ def build_complete_contacts_list(
     company_domain: str
 ) -> List[Dict[str, str]]:
     """
-    Ensure EVERY single discovered email and EVERY single phone number
-    is included in the contacts list, without dropping any numbers or emails.
+    Build deduplicated contacts list with ONLY unique emails and unique phone numbers.
+    No duplicate emails, no duplicate phone numbers, and no names.
     """
+    # 1. Collect all valid emails and deduplicate case-insensitively
+    unique_emails: List[str] = []
+    seen_emails: Set[str] = set()
+
+    for em in all_emails:
+        cleaned = clean_email(em)
+        if cleaned and cleaned.lower() not in seen_emails:
+            seen_emails.add(cleaned.lower())
+            unique_emails.append(cleaned)
+
+    # 2. Collect all valid phone numbers and deduplicate strictly by digits
+    all_raw_phones = list(all_phones)
+    for c in named_contacts:
+        if c.get("phone"):
+            all_raw_phones.append(c["phone"])
+    unique_phones = dedupe_phones(all_raw_phones)
+
+    # 3. Pair 1-to-1 without repeating any email or any phone
     results: List[Dict[str, str]] = []
-    seen_contacts: Set[Tuple[str, str, str]] = set()
+    total_rows = max(len(unique_emails), len(unique_phones))
 
-    # Track which emails and phones have been paired
-    used_emails: Set[str] = set()
-    used_phones: Set[str] = set()
-
-    # 1. Process named contacts from team / person sections first
-    for person in named_contacts:
-        name = person.get("name", "").strip()
-        # If all uppercase, convert to Title Case
-        if name.isupper():
-            name = name.title()
-
-        email = person.get("email", "").strip()
-        phone = person.get("phone", "").strip()
-
-        # If missing email, assign an unused email from all_emails
-        if not email:
-            for e in all_emails:
-                if e not in used_emails:
-                    email = e
-                    used_emails.add(e)
-                    break
-            if not email and all_emails:
-                email = all_emails[0]
-        else:
-            used_emails.add(email)
-
-        # If missing phone, assign an unused phone from all_phones
-        if not phone:
-            for p in all_phones:
-                if p not in used_phones:
-                    phone = p
-                    used_phones.add(p)
-                    break
-            if not phone and all_phones:
-                phone = all_phones[0]
-        else:
-            used_phones.add(phone)
-
-        key = (normalize_name_key(name), email.lower(), re.sub(r'[^\d]', '', phone))
-        if key not in seen_contacts:
-            seen_contacts.add(key)
-            results.append({
-                "name": name,
-                "email": email,
-                "phone": phone,
-                "designation": person.get("designation", "Representative"),
-                "source_url": person.get("source_url", source_url)
-            })
-
-    # 2. Check for any remaining emails or phones that have NOT yet been captured
-    unassigned_emails = [e for e in all_emails if e not in used_emails]
-    unassigned_phones = [p for p in all_phones if p not in used_phones]
-
-    total_extra = max(len(unassigned_emails), len(unassigned_phones))
-
-    for i in range(total_extra):
-        em = unassigned_emails[i] if i < len(unassigned_emails) else (all_emails[0] if all_emails else "")
-        ph = unassigned_phones[i] if i < len(unassigned_phones) else (all_phones[0] if all_phones else "")
-
-        # Infer descriptive name based on email prefix or phone line
-        guessed_name = "Contact"
-        if i < len(unassigned_emails):
-            user_part = unassigned_emails[i].split('@')[0].lower()
-            name_parts = re.split(r'[._\-]', user_part)
-            if len(name_parts) >= 2 and all(p.isalpha() and len(p) > 1 for p in name_parts[:2]):
-                guessed_name = " ".join(p.capitalize() for p in name_parts[:2])
-            elif user_part in ["sales", "support", "info", "contact", "help", "enquiry", "admin", "office", "marketing", "billing"]:
-                guessed_name = f"{user_part.capitalize()} Department"
-            else:
-                guessed_name = user_part.capitalize()
-        elif i < len(unassigned_phones):
-            guessed_name = f"Inquiries / Line {i + 1}"
-
-        key = (normalize_name_key(guessed_name), em.lower(), re.sub(r'[^\d]', '', ph))
-        if key not in seen_contacts:
-            seen_contacts.add(key)
-            results.append({
-                "name": guessed_name,
-                "email": em,
-                "phone": ph,
-                "designation": "General Inquiries",
-                "source_url": source_url
-            })
+    for i in range(total_rows):
+        em = unique_emails[i] if i < len(unique_emails) else ""
+        ph = unique_phones[i] if i < len(unique_phones) else ""
+        results.append({
+            "name": "",
+            "email": em,
+            "phone": ph,
+            "designation": "",
+            "source_url": source_url
+        })
 
     return results
 

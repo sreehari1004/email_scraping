@@ -351,7 +351,7 @@ def export_contacts(
     contacts = [dict(c) for c in cursor.fetchall()]
     conn.close()
 
-    headers = ["ID", "Name", "Email", "Phone", "Company Name"]
+    headers = ["ID", "Email", "Phone", "Company Name", "Website"]
     if format == "xlsx":
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -359,8 +359,8 @@ def export_contacts(
         ws.append(headers)
         for c in contacts:
             ws.append([
-                c.get("id"), c.get("name"), c.get("email"), c.get("phone"),
-                c.get("company_name")
+                c.get("id"), c.get("email"), c.get("phone"),
+                c.get("company_name"), c.get("source_url")
             ])
         stream = io.BytesIO()
         wb.save(stream)
@@ -376,8 +376,8 @@ def export_contacts(
         writer.writerow(headers)
         for c in contacts:
             writer.writerow([
-                c.get("id"), c.get("name"), c.get("email"), c.get("phone"),
-                c.get("company_name")
+                c.get("id"), c.get("email"), c.get("phone"),
+                c.get("company_name"), c.get("source_url")
             ])
         stream.seek(0)
         return StreamingResponse(

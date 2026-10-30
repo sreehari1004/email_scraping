@@ -17,9 +17,7 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
   const [job, setJob] = useState<Job | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [websites, setWebsites] = useState<JobWebsite[]>([]);
-  const [activeTab, setActiveTab] = useState<'contacts' | 'websites' | 'summary'>('contacts');
   const [search, setSearch] = useState('');
-  const [websiteFilter, setWebsiteFilter] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,23 +43,15 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
   };
 
   const filteredContacts = contacts.filter((c) => {
-    if (websiteFilter !== 'all') {
-      const targetW = websites.find(w => w.website === websiteFilter);
-      const matchesWebsite = (targetW && c.website_id === targetW.id) ||
-        (c.source_url && c.source_url.includes(websiteFilter)) ||
-        (c.company_name && c.company_name.toLowerCase().includes(websiteFilter.toLowerCase()));
-      if (!matchesWebsite) return false;
-    }
     const term = search.toLowerCase();
     return (
-      c.name.toLowerCase().includes(term) ||
-      c.email.toLowerCase().includes(term) ||
-      c.phone.toLowerCase().includes(term) ||
-      (c.company_name && c.company_name.toLowerCase().includes(term))
+      (c.email && c.email.toLowerCase().includes(term)) ||
+      (c.phone && c.phone.toLowerCase().includes(term))
     );
   });
 
-  const isMultiSite = websites.length > 1;
+  const domain = websites[0]?.website || job?.job_name || 'Website';
+  const siteUrl = websites[0]?.url || (job?.job_name?.startsWith('http') ? job.job_name : `https://${domain}`);
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
@@ -76,11 +66,16 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
               </div>
               <div>
                 <h3 className="font-bold text-slate-900 text-base">
-                  {websites[0]?.website || job?.job_name || 'Website'}
+                  {domain}
                 </h3>
-                <span className="text-xs text-slate-400">
-                  {websites[0]?.url || (job?.job_name?.startsWith('http') ? job.job_name : `https://${job?.job_name || 'website.com'}`)}
-                </span>
+                <a 
+                  href={siteUrl} 
+                  target="_blank" 
+                  rel="noreferrer" 
+                  className="text-xs text-slate-400 hover:text-blue-600 hover:underline"
+                >
+                  {siteUrl}
+                </a>
               </div>
             </div>
           </div>
@@ -90,7 +85,7 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
             <div className="flex flex-wrap items-center gap-3 text-xs">
               <div className="text-right">
                 <div className="font-semibold text-slate-700">{job?.created_at}</div>
-                <div className="text-slate-400">{job?.duration || '00:49:06'} {String(jobId).padStart(5, '0')}</div>
+                <div className="text-slate-400">{job?.duration || '00:00:03'} #{String(jobId).padStart(5, '0')}</div>
               </div>
 
               {job?.status === 'Completed' && (
@@ -109,224 +104,93 @@ export const JobDetailsModal: React.FC<JobDetailsModalProps> = ({ jobId, onClose
               <div className="bg-slate-100 px-3 py-1 rounded-lg font-bold text-slate-800">
                 {contacts.length} <span className="font-normal text-slate-500">Contacts Found</span>
               </div>
-
-              <div className="bg-slate-100 px-3 py-1 rounded-lg font-bold text-slate-800">
-                {job?.failed_websites || 0} <span className="font-normal text-slate-500">Failed Websites</span>
-              </div>
             </div>
 
             <button
               onClick={onClose}
-              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+              className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="px-6 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
-          <div className="flex gap-6">
-            <button
-              onClick={() => setActiveTab('contacts')}
-              className={`py-3.5 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
-                activeTab === 'contacts'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Contacts ({contacts.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('websites')}
-              className={`py-3.5 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
-                activeTab === 'websites'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Website Details ({websites.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('summary')}
-              className={`py-3.5 text-sm font-semibold border-b-2 transition-colors cursor-pointer ${
-                activeTab === 'summary'
-                  ? 'border-blue-600 text-blue-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              Summary
-            </button>
+        {/* Action & Filter Bar */}
+        <div className="px-6 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+          <div className="text-sm font-semibold text-slate-800">
+            Contacts ({contacts.length})
           </div>
 
-          {activeTab === 'contacts' && (
-            <div className="flex items-center gap-3 py-2">
-              {isMultiSite && (
-                <select
-                  value={websiteFilter}
-                  onChange={(e) => setWebsiteFilter(e.target.value)}
-                  className="bg-white border border-slate-200 rounded-lg text-xs text-slate-700 px-2.5 py-1.5 focus:outline-hidden"
-                >
-                  <option value="all">All Websites ({contacts.length})</option>
-                  {websites.map((w) => (
-                    <option key={w.id} value={w.website}>
-                      {w.website}
-                    </option>
-                  ))}
-                </select>
-              )}
-
-              <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Search contacts..."
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-hidden focus:border-blue-500 w-52"
-                />
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => handleExport('csv')}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium transition-colors shadow-xs cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Export
-                </button>
-              </div>
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search contacts..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 pr-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs text-slate-800 focus:outline-hidden focus:border-blue-500 w-56 shadow-2xs"
+              />
             </div>
-          )}
+
+            <button
+              onClick={() => handleExport('csv')}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-xs cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export
+            </button>
+          </div>
         </div>
 
-        {/* Tab Body */}
+        {/* Contacts Table Body */}
         <div className="flex-1 overflow-y-auto p-6">
           {loading ? (
             <div className="flex items-center justify-center py-16">
               <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
             </div>
-          ) : activeTab === 'contacts' ? (
+          ) : (
             <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
               <table className="w-full text-left text-sm text-slate-600">
                 <thead className="bg-slate-50/80 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
                   <tr>
-                    <th className="py-3 px-4">Name</th>
-                    {isMultiSite && <th className="py-3 px-4">Website</th>}
-                    <th className="py-3 px-4">Email</th>
-                    <th className="py-3 px-4">Phone</th>
+                    <th className="py-3.5 px-6">Email</th>
+                    <th className="py-3.5 px-6">Phone Number</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredContacts.length === 0 ? (
                     <tr>
-                      <td colSpan={isMultiSite ? 4 : 3} className="py-8 text-center text-slate-400">
+                      <td colSpan={2} className="py-8 text-center text-slate-400">
                         No contacts found matching your search.
                       </td>
                     </tr>
                   ) : (
-                    filteredContacts.map((contact) => (
-                      <tr key={contact.id} className="hover:bg-slate-50/60 transition-colors">
-                        <td className="py-3.5 px-4 font-semibold text-slate-900">
-                          {contact.name || 'N/A'}
-                        </td>
-                        {isMultiSite && (
-                          <td className="py-3.5 px-4 text-xs font-medium text-slate-600">
-                            <span className="inline-block px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200">
-                              {contact.company_name || contact.source_url?.split('//')[1]?.split('/')[0] || 'Website'}
-                            </span>
-                          </td>
-                        )}
-                        <td className="py-3.5 px-4 text-slate-700">
+                    filteredContacts.map((contact, idx) => (
+                      <tr key={contact.id || idx} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="py-3.5 px-6 font-medium text-slate-800">
                           {contact.email ? (
-                            <a href={`mailto:${contact.email}`} className="hover:text-blue-600 hover:underline">
+                            <a href={`mailto:${contact.email}`} className="text-slate-900 hover:text-blue-600 hover:underline">
                               {contact.email}
                             </a>
                           ) : (
-                            <span className="text-slate-400">-</span>
+                            <span className="text-slate-400 italic">-</span>
                           )}
                         </td>
-                        <td className="py-3.5 px-4 text-slate-700 font-mono text-xs">
-                          {contact.phone || '-'}
+                        <td className="py-3.5 px-6 text-slate-700 font-mono text-xs">
+                          {contact.phone ? (
+                            <a href={`tel:${contact.phone}`} className="hover:text-blue-600 hover:underline">
+                              {contact.phone}
+                            </a>
+                          ) : (
+                            <span className="text-slate-400 italic">-</span>
+                          )}
                         </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
-            </div>
-          ) : activeTab === 'websites' ? (
-            <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-              <table className="w-full text-left text-sm text-slate-600">
-                <thead className="bg-slate-50/80 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  <tr>
-                    <th className="py-3 px-4">Website</th>
-                    <th className="py-3 px-4">Status</th>
-                    <th className="py-3 px-4">Contacts Extracted</th>
-                    <th className="py-3 px-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {websites.map((w) => (
-                    <tr key={w.id} className="hover:bg-slate-50/60">
-                      <td className="py-3.5 px-4 font-semibold text-slate-900 flex items-center gap-2">
-                        <Globe className="w-4 h-4 text-slate-400" />
-                        <a href={w.url} target="_blank" rel="noreferrer" className="hover:text-blue-600 hover:underline">
-                          {w.website}
-                        </a>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          w.status === 'Completed' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-                        }`}>
-                          <span className={`w-1.5 h-1.5 rounded-full ${w.status === 'Completed' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-                          {w.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 font-medium text-slate-800">
-                        {w.contacts_count}
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            setWebsiteFilter(w.website);
-                            setActiveTab('contacts');
-                          }}
-                          className="px-3 py-1 text-xs font-medium bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors cursor-pointer"
-                        >
-                          View Contacts
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="space-y-6">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-slate-50 rounded-xl p-4 border border-slate-100">
-                  <div className="text-xs text-slate-500 uppercase font-semibold mb-1">Total Web Targets</div>
-                  <div className="text-2xl font-bold text-slate-900">{job?.total_websites}</div>
-                </div>
-                <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-100">
-                  <div className="text-xs text-emerald-700 uppercase font-semibold mb-1">Successful Extractions</div>
-                  <div className="text-2xl font-bold text-emerald-700">{job?.completed_websites}</div>
-                </div>
-                <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                  <div className="text-xs text-blue-700 uppercase font-semibold mb-1">Execution Elapsed</div>
-                  <div className="text-2xl font-bold text-blue-700">{job?.duration}</div>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 rounded-xl p-5 border border-slate-200">
-                <h4 className="font-semibold text-slate-800 text-sm mb-3">Scraping Diagnostic Information</h4>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  The automated multi-page extraction engine inspected homepage meta tags, header navigation items,
-                  structured team directories, and standard contact routes (/contact, /about, /team). 
-                  Validated regex filters eliminated junk emails and compiled telephone numbers into standardized international formats.
-                </p>
-              </div>
             </div>
           )}
         </div>
