@@ -18,6 +18,7 @@ import openpyxl
 from database import init_db, get_connection
 from file_parser import parse_csv_file, parse_excel_file, parse_pdf_file, clean_and_deduplicate
 from scraper import scrape_url
+from search_discovery import discover_websites
 from ai_service import generate_email_content
 from email_sender import get_smtp_config, test_smtp_connection, send_smtp_email
 
@@ -38,6 +39,18 @@ app.add_middleware(
 # ----------------- Models -----------------
 class StartScrapeRequest(BaseModel):
     urls: List[str]
+    location: Optional[str] = ""
+    niche: Optional[str] = ""
+
+class DiscoverRequest(BaseModel):
+    niche: str
+    location: str
+    max_results: Optional[int] = 20
+
+class DiscoverAndStartRequest(BaseModel):
+    niche: str
+    location: str
+    max_results: Optional[int] = 20
 
 class GenerateEmailRequest(BaseModel):
     prompt: str
@@ -173,6 +186,34 @@ def normalize_site_domain(url_or_name: str) -> str:
         return m.group(1).lower().replace("www.", "").strip()
     return url_or_name.lower().replace("www.", "").strip()
 
+@app.post("/api/scrape/discover")
+def discover_endpoint(req: DiscoverRequest):
+    if not req.niche.strip() and not req.location.strip():
+        raise HTTPException(status_code=400, detail="Please provide at least a domain/niche or a location")
+    
+    limit = max(1, min(req.max_results or 20, 60))
+    websites = discover_websites(req.niche, req.location, max_results=limit)
+    return {
+        "niche": req.niche,
+        "location": req.location,
+        "total": len(websites),
+        "websites": websites
+    }
+
+@app.post("/api/scrape/discover-and-start")
+def discover_and_start_scrape(req: DiscoverAndStartRequest, background_tasks: BackgroundTasks):
+    if not req.niche.strip() and not req.location.strip():
+        raise HTTPException(status_code=400, detail="Please provide at least a domain/niche or a location")
+        
+    limit = max(1, min(req.max_results or 20, 60))
+    websites = discover_websites(req.niche, req.location, max_results=limit)
+    if not websites:
+        raise HTTPException(status_code=404, detail=f"No business websites found for '{req.niche}' in '{req.location}'")
+        
+    urls = [w["url"] for w in websites]
+    scrape_req = StartScrapeRequest(urls=urls, location=req.location, niche=req.niche)
+    return start_scrape(scrape_req, background_tasks)
+
 @app.post("/api/scrape/start")
 def start_scrape(req: StartScrapeRequest, background_tasks: BackgroundTasks):
     urls = clean_and_deduplicate(req.urls)
@@ -211,9 +252,9 @@ def start_scrape(req: StartScrapeRequest, background_tasks: BackgroundTasks):
 
         # Insert individual job for each website
         cursor.execute("""
-            INSERT INTO jobs (job_name, created_at, status, total_websites, completed_websites, failed_websites, in_progress_websites, contacts_found, duration, batch_id)
-            VALUES (?, ?, 'In Progress', 1, 0, 0, 1, 0, '00:00:00', ?)
-        """, (site_name, now_str, batch_id))
+            INSERT INTO jobs (job_name, created_at, status, total_websites, completed_websites, failed_websites, in_progress_websites, contacts_found, duration, batch_id, location, niche)
+            VALUES (?, ?, 'In Progress', 1, 0, 0, 1, 0, '00:00:00', ?, ?, ?)
+        """, (site_name, now_str, batch_id, req.location or "", req.niche or ""))
         conn.commit()
         site_job_id = cursor.lastrowid
         url_job_pairs.append((url, site_job_id))

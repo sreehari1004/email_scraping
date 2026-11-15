@@ -24,9 +24,19 @@ def init_db():
         in_progress_websites INTEGER DEFAULT 0,
         contacts_found INTEGER DEFAULT 0,
         duration TEXT,
-        batch_id INTEGER DEFAULT 0
+        batch_id INTEGER DEFAULT 0,
+        location TEXT DEFAULT '',
+        niche TEXT DEFAULT ''
     )
     """)
+
+    # Ensure location and niche columns exist if table was already created
+    cursor.execute("PRAGMA table_info(jobs)")
+    existing_cols = [row[1] for row in cursor.fetchall()]
+    if "location" not in existing_cols:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN location TEXT DEFAULT ''")
+    if "niche" not in existing_cols:
+        cursor.execute("ALTER TABLE jobs ADD COLUMN niche TEXT DEFAULT ''")
 
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS job_websites (

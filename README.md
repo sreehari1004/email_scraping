@@ -8,7 +8,8 @@ Built in accordance with the project specification and UI design mockups.
 
 ## Key Modules & Features
 
-### 1. Home (URL Submission)
+### 1. Home (Discovery, URL Submission & File Upload)
+- **Discover by Niche & Location (NEW)**: Automated lead finding via DuckDuckGo Search (`ddgs`). Enter an Industry / Niche (e.g. *perfume dealers*) and a Location (e.g. *Russia*) to automatically find business websites, preview/filter results, and scrape them.
 - **Single URL**: Direct entry with instant validation.
 - **Bulk URLs**: Multi-line entry with duplicate detection and URL normalization.
 - **File Upload**: Native ingestion of **CSV**, **Excel (.xlsx, .xls)**, and **PDF** documents with automated regex URL extraction.
@@ -63,15 +64,19 @@ Built in accordance with the project specification and UI design mockups.
 ## Quick Start Guide
 
 ### 1. Start the Unified Server (Backend & Frontend)
-Run with the provided virtual environment:
-```powershell
+Run with Python:
+```bash
+# On macOS / Linux:
+./venv/bin/python run.py
+
+# On Windows:
 .\venv\Scripts\python.exe run.py
 ```
 Open **[http://127.0.0.1:8000](http://127.0.0.1:8000)** in your browser.
 
 ### 2. Run Frontend in Development Mode (Optional)
 If you want hot-reloading on the frontend:
-```powershell
+```bash
 cd frontend
 npm run dev
 ```

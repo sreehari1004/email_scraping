@@ -19,6 +19,12 @@ from typing import Dict, List, Any, Optional, Set, Tuple
 import requests
 from bs4 import BeautifulSoup, Tag
 
+try:
+    import primp
+    HAS_PRIMP = True
+except ImportError:
+    HAS_PRIMP = False
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -41,13 +47,27 @@ BASE_HEADERS = {
 
 # Common contact/team page URL suffixes
 CONTACT_PATHS = [
+    # Universal / English
     "/contact", "/contact-us", "/contacts", "/contact-us.html", "/contact.html",
     "/get-in-touch", "/reach-us", "/reach-out", "/connect", "/inquire",
     "/contactus", "/contact_us",
+    # German / DACH (Germany, Austria, Switzerland) - Impressum is legally mandated
+    "/impressum", "/kontakt", "/b/impressum", "/impressum.html", "/kontakt.html",
+    # Russian / CIS
+    "/kontakty", "/kontakty.html", "/contacts.php", "/o-nas", "/o-kompanii", "/rekvizity",
+    # French
+    "/mentions-legales", "/contactez-nous", "/nous-contacter",
+    # Spanish / Latin America / Italy
+    "/contacto", "/aviso-legal", "/contatti",
+    # Nordic
+    "/om-os", "/om-oss",
+    # Regional subpaths
+    "/en/contact", "/en/contacts",
 ]
 ABOUT_PATHS = [
     "/about", "/about-us", "/about.html", "/about-us.html",
     "/company", "/our-company", "/who-we-are", "/our-story",
+    "/ueber-uns", "/uber-uns", "/o-nas", "/o-kompanii", "/a-propos", "/sobre-nosotros",
 ]
 TEAM_PATHS = [
     "/team", "/our-team", "/people", "/staff", "/our-staff",
@@ -84,9 +104,38 @@ INTL_PHONE_REGEX = re.compile(
     r'(?<!\d)\+\d{1,3}[\s\-.]?\(?\d{1,4}\)?[\s\-.]?\d{2,4}[\s\-.]?\d{2,4}(?:[\s\-.]?\d{1,4})?(?!\d)'
 )
 
-# Strictly formatted phone (for text extraction fallback)
+# Strictly formatted phone (for text extraction fallback - requires delimiter)
 LOOSE_PHONE_REGEX = re.compile(
-    r'(?<!\d)(?:\+?[\d]{1,3}[\s\-.]?)?(?:\(?\d{2,4}\)?[\s\-.]?)?\d{3,4}[\s\-.]?\d{3,5}(?!\d)'
+    r'(?<!\d)(?:\+?[\d]{1,3}[\s\-.]?)?(?:\(?\d{2,4}\)?[\s\-.]?)\d{3,4}[\s\-.]\d{3,5}(?!\d)'
+)
+
+# Domestic mobile & landlines (e.g. UAE 050 123 4567, 04 123 4567; UK 020 7946 0958; Russia 8 800 555 35 35)
+DOMESTIC_PHONE_REGEX = re.compile(
+    r'(?<!\d)(?:0[1-9]\d?|8\s*\(?800\)?|\(?0[1-9]\d?\)?)[ \-.]?\d{2,4}[ \-.]?\d{2,4}(?:[ \-.]?\d{2,4})?(?!\d)'
+)
+
+# Global business & tax registration labels, barcodes, bank accounts, and postal codes
+GLOBAL_NON_PHONE_LABELS_REGEX = re.compile(
+    r'\b('
+    # Russia & CIS
+    r'ИНН|INN|ОГРН|OGRN|ОГРНИП|OGRNIP|КПП|KPP|БИК|BIK|ОКПО|OKPO|ОКВЭД|OKVED|Р/?С|К/?С|'
+    # Europe & UK
+    r'VAT|VAT\s*No|VAT\s*Reg|USt-?IdNr|TVA|CIF|NIF|PIVA|IVA|'
+    r'CRN|Company\s*No|Company\s*Number|Reg(?:istration)?\.?\s*(?:No|Number)?|'
+    # USA & Americas
+    r'EIN|SSN|Tax\s*ID|TIN|FEIN|BN|NEQ|'
+    # UAE & Middle East
+    r'TRN|Tax\s*Registration\s*Number|Trade\s*License|'
+    # Asia & Australia
+    r'GST|GSTIN|PAN|CIN|ABN|ACN|'
+    # Banking globally
+    r'IBAN|BIC|SWIFT|Account\s*No|Bank\s*Account|'
+    # E-Commerce & Retail globally
+    r'SKU|EAN|UPC|Barcode|ISBN|Order\s*No|Tracking\s*No|'
+    # Postal globally
+    r'Zip|Postal\s*Code|Postcode|Индекс'
+    r')\s*[:#-]?\s*([^\n\r,;]{3,35})',
+    re.IGNORECASE
 )
 
 # Common designations for person extraction
@@ -117,6 +166,7 @@ SOCIAL_DOMAINS = [
 
 # Year / zip / version false positive filters for phone
 YEAR_PATTERN = re.compile(r'^(?:19|20)\d{2}$')
+YEAR_RANGE_PATTERN = re.compile(r'^(?:19|20)\d{2}[\s\-–—/]+(?:19|20)?\d{2}$')
 VERSION_PATTERN = re.compile(r'^\d+\.\d+(?:\.\d+)*$')
 
 
@@ -132,20 +182,38 @@ def make_session(ua_index: int = 0) -> requests.Session:
     return session
 
 
-def fetch_page(url: str, session: requests.Session, timeout: int = 10, retries: int = 2) -> Optional[requests.Response]:
-    """Fetch a URL with retries and user-agent rotation."""
+def fetch_page(url: str, session: requests.Session, timeout: int = 10, retries: int = 2) -> Optional[Any]:
+    """Fetch a URL with retries, user-agent rotation, and modern TLS browser impersonation fallback."""
     for attempt in range(retries + 1):
         try:
             resp = session.get(url, timeout=timeout, allow_redirects=True)
             if resp.status_code < 400:
                 return resp
-            if resp.status_code in (403, 429) and attempt < retries:
-                # Try with a different user-agent
-                session.headers["User-Agent"] = USER_AGENTS[(attempt + 1) % len(USER_AGENTS)]
-                time.sleep(0.5)
-                continue
+            if resp.status_code in (403, 429, 503):
+                # Try modern browser TLS impersonation fallback if available
+                if HAS_PRIMP:
+                    try:
+                        p_client = primp.Client(impersonate="chrome_126", follow_redirects=True, timeout=timeout)
+                        p_resp = p_client.get(url)
+                        if p_resp.status_code < 400:
+                            return p_resp
+                    except Exception:
+                        pass
+                if attempt < retries:
+                    # Try with a different user-agent
+                    session.headers["User-Agent"] = USER_AGENTS[(attempt + 1) % len(USER_AGENTS)]
+                    time.sleep(0.5)
+                    continue
             return None
         except requests.exceptions.SSLError:
+            if HAS_PRIMP:
+                try:
+                    p_client = primp.Client(impersonate="chrome_126", follow_redirects=True, timeout=timeout, verify=False)
+                    p_resp = p_client.get(url)
+                    if p_resp.status_code < 400:
+                        return p_resp
+                except Exception:
+                    pass
             # Try without SSL verification as fallback
             try:
                 resp = session.get(url, timeout=timeout, allow_redirects=True, verify=False)
@@ -155,6 +223,14 @@ def fetch_page(url: str, session: requests.Session, timeout: int = 10, retries: 
                 pass
             return None
         except requests.exceptions.ConnectionError:
+            if HAS_PRIMP and attempt == retries:
+                try:
+                    p_client = primp.Client(impersonate="chrome_126", follow_redirects=True, timeout=timeout)
+                    p_resp = p_client.get(url)
+                    if p_resp.status_code < 400:
+                        return p_resp
+                except Exception:
+                    pass
             if attempt < retries:
                 time.sleep(0.5)
                 continue
@@ -202,26 +278,52 @@ def is_junk_email(email: str) -> bool:
 
 DUMMY_PHONES = {"1234567890", "9876543210", "0123456789", "0000000000", "1111111111"}
 
-def clean_phone(raw: str) -> str:
-    """Clean and validate a phone number string."""
+def clean_phone(raw: str, excluded_digits: Optional[Set[str]] = None) -> str:
+    """Clean and validate a phone number string according to global ITU-T standards."""
     if not raw:
         return ""
     digits_only = re.sub(r'[^\d]', '', raw)
-    # Too short or too long
+    # 1. Exclude numbers identified by non-phone global labels (VAT, TRN, EIN, INN, etc.)
+    if excluded_digits and digits_only in excluded_digits:
+        return ""
+    # 2. Length check under international ITU-T E.164 (7 to 15 digits)
     if len(digits_only) < 7 or len(digits_only) > 15:
         return ""
-    # Filter dummy template numbers
+    # 3. Filter dummy template numbers
     if digits_only in DUMMY_PHONES or digits_only.endswith("9876543210") or digits_only.endswith("1234567890"):
         return ""
-    # Filter out pure years (4-digit years 1900-2099)
+    # Filter repeating identical digits (e.g. 11111111, 000000000)
+    if len(set(digits_only)) <= 2 and len(digits_only) >= 7:
+        return ""
+    # 4. Pure years and year ranges
     if YEAR_PATTERN.match(digits_only):
         return ""
-    # Filter version numbers
     stripped = raw.strip()
+    if YEAR_RANGE_PATTERN.match(stripped):
+        return ""
+    if len(digits_only) == 8 and (digits_only.startswith("19") or digits_only.startswith("20")) and (digits_only[4:6] in ["19", "20"]):
+        return ""
+    # 5. Dates (e.g. 12/05/2024, 2024-05-12, 12.05.2024)
+    if re.match(r'^\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4}$', stripped) or re.match(r'^\d{4}[./\-]\d{1,2}[./\-]\d{1,2}$', stripped):
+        return ""
+    # 6. Version numbers
     if VERSION_PATTERN.match(stripped):
         return ""
-    # Filter numbers that are clearly zip codes (exactly 5 digits with no formatting)
-    if re.match(r'^\d{5}$', digits_only):
+    # 7. Postal codes (5 or 6 unformatted digits)
+    if re.match(r'^\d{5,6}$', digits_only) and not stripped.startswith(('+', '00')):
+        return ""
+    # 8. Unformatted solid digit strings:
+    # Real business phone numbers on websites always contain '+' or delimiters ('(', ')', '-', '.', ' ').
+    # Unbroken digit strings of 8+ digits with no phone structure are tax IDs, barcodes, order numbers, or bank codes.
+    if re.match(r'^\d+$', stripped):
+        # Only allow domestic 10 or 11 digits if standard (e.g. 0501234567 or 88005553535), otherwise drop
+        if len(stripped) in (8, 9, 12, 13, 14, 15):
+            return ""
+    # 9. 12-15 digits without '+' or international prefix '00' are NOT phone numbers
+    if len(digits_only) in (12, 13, 14, 15) and not stripped.startswith(('+', '00')):
+        return ""
+    # 10. Filter 16+ digit bank checking accounts and credit cards
+    if len(digits_only) >= 16:
         return ""
     return stripped
 
@@ -264,19 +366,32 @@ def normalize_name_key(name: str) -> str:
 def extract_phones_from_text(text: str) -> List[str]:
     """Extract phone numbers from free text using multiple strategies."""
     phones = set()
+    # Scan for labeled tax / registration numbers, barcodes, bank accounts worldwide
+    excluded_digits = set()
+    for m in GLOBAL_NON_PHONE_LABELS_REGEX.finditer(text):
+        val = m.group(2).strip()
+        dig = re.sub(r'[^\d]', '', val)
+        if dig:
+            excluded_digits.add(dig)
+
     # International format (+XX...)
     for m in INTL_PHONE_REGEX.finditer(text):
-        p = clean_phone(m.group())
+        p = clean_phone(m.group(), excluded_digits)
+        if p:
+            phones.add(p)
+    # Domestic standard mobile/landlines (UAE, UK, US, etc.)
+    for m in DOMESTIC_PHONE_REGEX.finditer(text):
+        p = clean_phone(m.group(), excluded_digits)
         if p:
             phones.add(p)
     # US format
     for m in PHONE_REGEX.finditer(text):
-        p = clean_phone(m.group())
+        p = clean_phone(m.group(), excluded_digits)
         if p:
             phones.add(p)
-    # Loose fallback
+    # Loose fallback (strictly requires formatting delimiters)
     for m in LOOSE_PHONE_REGEX.finditer(text):
-        p = clean_phone(m.group())
+        p = clean_phone(m.group(), excluded_digits)
         if p and len(re.sub(r'[^\d]', '', p)) >= 8:
             phones.add(p)
     return list(phones)
@@ -647,7 +762,9 @@ def discover_contact_pages(soup: BeautifulSoup, base_url: str, visited: Set[str]
     found = []
     contact_keywords = re.compile(
         r'contact|about|team|staff|people|leadership|management|founders|'
-        r'get.in.touch|reach.us|connect|inquire|company|who.we.are',
+        r'get.in.touch|reach.us|connect|inquire|company|who.we.are|'
+        r'impressum|kontakt|kontakty|контакт|о\s*нас|о\s*компании|реквизиты|'
+        r'mentions.legales|nous.contacter|contacto|contatti|kundenservice|customer.service',
         re.IGNORECASE
     )
 
@@ -839,18 +956,37 @@ def scrape_url(target_url: str) -> Dict[str, Any]:
     # Build initial page list
     initial_pages = [target_url]
 
-    # Add standard contact/about/team paths
-    for path in CONTACT_PATHS[:6]:
+    # Prioritize regional legal/contact paths based on TLD
+    d_lower = domain.lower()
+    regional_paths = []
+    if d_lower.endswith((".de", ".at", ".ch")):
+        regional_paths = ["/impressum", "/kontakt", "/b/impressum"]
+    elif d_lower.endswith((".ru", ".by", ".kz", ".su")):
+        regional_paths = ["/kontakty", "/o-kompanii", "/rekvizity", "/o-nas"]
+    elif d_lower.endswith((".fr", ".be")):
+        regional_paths = ["/mentions-legales", "/contactez-nous"]
+    elif d_lower.endswith((".es", ".mx", ".ar", ".co")):
+        regional_paths = ["/contacto", "/aviso-legal"]
+    elif d_lower.endswith((".it",)):
+        regional_paths = ["/contatti", "/chi-siamo"]
+
+    for path in regional_paths:
         url = base_url + path
         if url != target_url:
+            initial_pages.append(url)
+
+    # Add standard contact/about/team paths
+    for path in CONTACT_PATHS[:8]:
+        url = base_url + path
+        if url != target_url and url not in initial_pages:
             initial_pages.append(url)
     for path in ABOUT_PATHS[:4]:
         url = base_url + path
-        if url != target_url:
+        if url != target_url and url not in initial_pages:
             initial_pages.append(url)
     for path in TEAM_PATHS[:4]:
         url = base_url + path
-        if url != target_url:
+        if url != target_url and url not in initial_pages:
             initial_pages.append(url)
 
     initial_pages = list(dict.fromkeys(initial_pages))  # deduplicate
